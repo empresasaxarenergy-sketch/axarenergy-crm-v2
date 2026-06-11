@@ -19,9 +19,9 @@ nav img{height:28px;margin-right:12px;padding:12px 0}
 nav button{padding:14px 14px;border:none;background:none;font-size:13px;font-weight:500;color:#6b7280;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
 nav button.on{color:var(--ax);border-bottom-color:var(--ax)}
 .sync{margin-left:auto;font-size:11px;padding:4px 10px;border-radius:20px;font-weight:600}
-.sync.ok{background:#dcfce7;color:var(--gr)}
-.sync.off{background:#fef3c7;color:var(--am)}
-.sync.err{background:#fee2e2;color:var(--re)}
+.sync.ok{background:#dcfce7;color:#166534;font-weight:600}
+.sync.off{background:#fef3c7;color:#92400e;font-weight:600}
+.sync.err{background:#fff7ed;color:#9a3412;font-weight:600}
 
 /* LAYOUT */
 .page{display:none;padding:16px;max-width:900px;margin:0 auto}
@@ -157,7 +157,7 @@ nav button.on{color:var(--ax);border-bottom-color:var(--ax)}
   <button onclick="setTab('clientes',this)">👥 <span>Clientes</span></button>
   <button onclick="setTab('parte',this)">📝 <span>Parte</span></button>
   <button onclick="setTab('alertas',this)">🔔 <span>Alertas</span></button>
-  <span class="sync off" id="sync">⬤ Local</span>
+  <button id="installBtn" onclick="installApp()" style="display:none;align-items:center;gap:5px;height:28px;padding:0 12px;border-radius:20px;border:1px solid var(--ax);background:#eff6ff;color:var(--ax);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:6px">📲 Instalar</button><span class="sync off" id="sync">◌ Conectando...</span>
 </nav>
 
 <div id="agenda" class="page on"></div>
@@ -218,27 +218,45 @@ function setSB(status){
   el.textContent=txt; el.className='sync '+cls;
 }
 
+// ── OFFLINE QUEUE ──
+let _queue = false;
+window.addEventListener('online',  ()=>{ if(_queue){ _queue=false; saveCloud(); } });
+window.addEventListener('offline', ()=>{ setSB('off'); });
+
+async function sbRetry(method,table,body,qs='',tries=3){
+  for(let i=0;i<tries;i++){
+    try{ return await sb(method,table,body,qs); }
+    catch(e){ if(i===tries-1) throw e; await new Promise(r=>setTimeout(r,1000*(i+1))); }
+  }
+}
+
+async function saveCloud(){
+  setSB('saving');
+  try{
+    const ops=[
+      V.length?sbRetry('POST','visitas',V.map(v=>({id:v.id,cliente:v.cliente||'',contacto:v.contacto||'',telefono:v.telefono||'',fecha:v.fecha||'',hora:v.hora||'',tipo:v.tipo||'',estado:v.estado||'',notas:v.notas||''})),'?on_conflict=id'):null,
+      C.length?sbRetry('POST','clientes',C.map(c=>({id:c.id,empresa:c.empresa||'',nif:c.nif||'',contacto:c.contacto||'',cargo:c.cargo||'',telefono:c.telefono||'',email:c.email||'',sector:c.sector||'',ciudad:c.ciudad||'',estado:c.estado||'nunca',origen:c.origen||'',cups:c.cups||'',direccion:c.direccion||'',compania:c.compania||'',energia:c.energia||'',tarifa:c.tarifa||'',kw:c.kw||0,kwh:c.kwh||0,importe:c.importe||0,notas:c.notas||''})),'?on_conflict=id'):null,
+      O.length?sbRetry('POST','oportunidades',O.map(o=>({id:o.id,cliente:o.cliente||'',contacto:o.contacto||'',valor:o.valor||0,prob:o.prob||50,etapa:o.etapa||'',tipo:o.tipo||'',fecha:o.fecha||'',notas:o.notas||''})),'?on_conflict=id'):null,
+      AL.length?sbRetry('POST','alertas',AL.map(a=>({id:a.id,msg:a.msg||'',tipo:a.tipo||'',fecha:a.fecha||'',hora:a.hora||'',cliente:a.cliente||'',activa:a.activa!==false})),'?on_conflict=id'):null,
+    ];
+    const partes=Object.entries(PA).map(([fecha,p])=>({fecha,obj:p.obj||'',log:p.log||'',dif:p.dif||'',prox:p.prox||'',mood:p.mood||'',tareas:p.tareas||[]}));
+    if(partes.length)ops.push(sbRetry('POST','partes',partes,'?on_conflict=fecha'));
+    await Promise.all(ops.filter(Boolean));
+    setSB('ok');
+  }catch(e){
+    setSB('err');
+    _queue=true;
+    console.warn('Supabase save, reintentará cuando haya conexión:',e.message);
+  }
+}
+
 async function save(){
   // 1. Siempre guarda en local primero
   if(!saveLocal()){return;}
   
   // 2. Luego intenta nube
-  setSB('saving');
-  try{
-    const ops=[
-      V.length?sb('POST','visitas',V.map(v=>({id:v.id,cliente:v.cliente||'',contacto:v.contacto||'',telefono:v.telefono||'',fecha:v.fecha||'',hora:v.hora||'',tipo:v.tipo||'',estado:v.estado||'',notas:v.notas||''})),'?on_conflict=id'):null,
-      C.length?sb('POST','clientes',C.map(c=>({id:c.id,empresa:c.empresa||'',nif:c.nif||'',contacto:c.contacto||'',cargo:c.cargo||'',telefono:c.telefono||'',email:c.email||'',sector:c.sector||'',ciudad:c.ciudad||'',estado:c.estado||'nunca',origen:c.origen||'',cups:c.cups||'',direccion:c.direccion||'',compania:c.compania||'',energia:c.energia||'',tarifa:c.tarifa||'',kw:c.kw||0,kwh:c.kwh||0,importe:c.importe||0,notas:c.notas||''})),'?on_conflict=id'):null,
-      O.length?sb('POST','oportunidades',O.map(o=>({id:o.id,cliente:o.cliente||'',contacto:o.contacto||'',valor:o.valor||0,prob:o.prob||50,etapa:o.etapa||'',tipo:o.tipo||'',fecha:o.fecha||'',notas:o.notas||''})),'?on_conflict=id'):null,
-      AL.length?sb('POST','alertas',AL.map(a=>({id:a.id,msg:a.msg||'',tipo:a.tipo||'',fecha:a.fecha||'',hora:a.hora||'',cliente:a.cliente||'',activa:a.activa!==false})),'?on_conflict=id'):null,
-    ];
-    const partes=Object.entries(PA).map(([fecha,p])=>({fecha,obj:p.obj||'',log:p.log||'',dif:p.dif||'',prox:p.prox||'',mood:p.mood||'',tareas:p.tareas||[]}));
-    if(partes.length)ops.push(sb('POST','partes',partes,'?on_conflict=fecha'));
-    await Promise.all(ops.filter(Boolean));
-    setSB('ok');
-  }catch(e){
-    setSB('err');
-    console.warn('Supabase save:',e.message);
-  }
+  if(!navigator.onLine){ setSB('off'); _queue=true; return; }
+  await saveCloud();
 }
 
 async function load(){
@@ -784,6 +802,37 @@ const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const g=id=>{const e=document.getElementById(id);return e?e.value.trim():'';};
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeM();});
+
+
+// ── PWA INSTALL ──
+let _installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _installPrompt = e;
+  const btn = document.getElementById('installBtn');
+  if(btn) btn.style.display = 'inline-flex';
+});
+window.addEventListener('appinstalled', () => {
+  const btn = document.getElementById('installBtn');
+  if(btn) btn.style.display = 'none';
+  toast('✅ App instalada correctamente');
+});
+function installApp() {
+  if(_installPrompt) {
+    _installPrompt.prompt();
+    _installPrompt.userChoice.then(r => {
+      _installPrompt = null;
+      if(r.outcome==='accepted') toast('✅ Instalando Axarenergy CRM...');
+    });
+  } else {
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if(isIOS) {
+      toast('En Safari: toca 📤 Compartir → Añadir a pantalla de inicio');
+    } else {
+      toast('En Chrome/Edge: busca el icono ⊕ en la barra de direcciones');
+    }
+  }
+}
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('./sw.js').catch(()=>{});

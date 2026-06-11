@@ -1,5 +1,32 @@
-const C='axar-v5';
-const F=['./index.html','./manifest.json','./icon.svg'];
-self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(C).then(c=>c.addAll(F).catch(()=>{})));});
-self.addEventListener('activate',e=>{e.waitUntil(Promise.all([clients.claim(),caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C).map(k=>caches.delete(k))))]))});
-self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>{if(r)return r;return fetch(e.request).then(res=>{if(!res||res.status!==200||res.type!=='basic')return res;caches.open(C).then(c=>c.put(e.request,res.clone()));return res;}).catch(()=>caches.match('./index.html'));}));});
+const CACHE = 'axar-v6';
+const CORE  = ['./index.html','./manifest.json','./icon.svg'];
+
+self.addEventListener('install', e => {
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE).catch(() => {})));
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(Promise.all([
+    clients.claim(),
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
+  ]));
+});
+
+self.addEventListener('fetch', e => {
+  // Solo cachear recursos propios, no las llamadas a Supabase
+  if(e.request.url.includes('supabase.co')) return;
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const network = fetch(e.request).then(resp => {
+        if(resp && resp.status === 200 && resp.type === 'basic') {
+          caches.open(CACHE).then(c => c.put(e.request, resp.clone()));
+        }
+        return resp;
+      }).catch(() => cached || caches.match('./index.html'));
+      return cached || network;
+    })
+  );
+});
